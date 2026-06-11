@@ -1,0 +1,40 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Gradle Build",
+      "runtimeExecutable": "gradle",
+      "runtimeArgs": ["build", "--info"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Unit Tests",
+      "runtimeExecutable": "gradle",
+      "runtimeArgs": ["test", "--info"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Android Tests (Emulator)",
+      "runtimeExecutable": "gradle",
+      "runtimeArgs": ["connectedAndroidTest", "--info"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Roborazzi Screenshot Tests",
+      "runtimeExecutable": "gradle",
+      "runtimeArgs": ["test", "-k", "Screenshot", "--info"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Build Debug APK",
+      "runtimeExecutable": "gradle",
+      "runtimeArgs": ["assembleDebug", "--info"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    }
+  ]
+}

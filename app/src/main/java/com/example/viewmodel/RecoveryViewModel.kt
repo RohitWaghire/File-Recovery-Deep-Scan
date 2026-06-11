@@ -43,7 +43,7 @@ enum class ScanState {
 class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel() {
     companion object {
         // Memory optimization constants
-        private const val MAX_FILES_IN_MEMORY = 500
+        private const val MAX_FILES_IN_MEMORY = 5000
         private const val BATCH_UI_UPDATE_SIZE = 50
     }
 
@@ -201,11 +201,6 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
                         // Pace batch updates
                         delay(100)
                     }
-
-                    // Prevent unbounded memory growth by limiting in-memory discovered list
-                    if (discovered.size > MAX_FILES_IN_MEMORY) {
-                        discovered.removeRange(0, minOf(100, discovered.size / 2))
-                    }
                 }
 
                 // Ensure all files are displayed
@@ -234,13 +229,17 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
 
     private fun scanDirectoryRecursive(dir: File, scanType: String, outputList: MutableList<ScannedFile>, depth: Int = 0, visited: MutableSet<String>) {
         if (!dir.exists() || !dir.isDirectory || depth > 10) return
+        // Bound memory: stop collecting once the cap is reached to avoid OOM on huge filesystems
+        if (outputList.size >= MAX_FILES_IN_MEMORY) return
         val canonicalPath = try { dir.canonicalPath } catch (e: Exception) { dir.absolutePath }
         if (!visited.add(canonicalPath)) return
         val list = dir.listFiles() ?: return
         
         for (file in list) {
             if (_scanState.value != ScanState.SCANNING) break
-            
+            // Bound memory: stop once the in-memory cap is reached
+            if (outputList.size >= MAX_FILES_IN_MEMORY) break
+
             if (file.isDirectory) {
                 // Ignore standard skip directories to avoid hanging under heavy Android frameworks
                 val dName = file.name

@@ -41,6 +41,11 @@ enum class ScanState {
 }
 
 class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel() {
+    companion object {
+        // Memory optimization constants
+        private const val MAX_FILES_IN_MEMORY = 500
+        private const val BATCH_UI_UPDATE_SIZE = 50
+    }
 
     private var scanJob: kotlinx.coroutines.Job? = null
     private val recoveryMutex = Mutex()
@@ -175,17 +180,37 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
                 throw e
             }
 
-            // Dynamic presentation: Pace search results rapidly with thread-safe access
+            // Dynamic presentation: Pace search results in batches to optimize memory and UI updates
             discoveredMutex.withLock {
                 val paceList = mutableListOf<ScannedFile>()
-                for (file in discovered) {
+                var batchCount = 0
+
+                for ((index, file) in discovered.withIndex()) {
                     if (_scanState.value != ScanState.SCANNING) break
+
                     _totalBytesScanned.value += file.sizeBytes
                     _currentScanningPath.value = file.path
                     paceList.add(file)
-                    _foundFiles.value = paceList.toList()
-                    // Fast updates
-                    delay(if (discovered.size > 20) 40 else 80)
+                    batchCount++
+
+                    // Update UI in batches instead of per-file for better performance
+                    if (batchCount >= BATCH_UI_UPDATE_SIZE || index == discovered.size - 1) {
+                        _foundFiles.value = _foundFiles.value + paceList.toList()
+                        paceList.clear()
+                        batchCount = 0
+                        // Pace batch updates
+                        delay(100)
+                    }
+
+                    // Prevent unbounded memory growth by limiting in-memory discovered list
+                    if (discovered.size > MAX_FILES_IN_MEMORY) {
+                        discovered.removeRange(0, minOf(100, discovered.size / 2))
+                    }
+                }
+
+                // Ensure all files are displayed
+                if (paceList.isNotEmpty()) {
+                    _foundFiles.value = _foundFiles.value + paceList
                 }
             }
 

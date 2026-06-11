@@ -222,39 +222,18 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
                 if (dName.startsWith(".") || dName.equals("Android", ignoreCase = true) || file.path.contains("/Android/data") || file.path.contains("/Android/obb")) continue
                 scanDirectoryRecursive(file, scanType, outputList, depth + 1, visited)
             } else {
-                val ext = file.extension.lowercase()
                 val hexHeader = readFileHeader(file)
-                
-                val isPhoto = ext in listOf("jpg", "jpeg", "png", "webp", "gif", "bmp") || hexHeader.startsWith("89504E47") || hexHeader.startsWith("FFD8FF") || hexHeader.startsWith("47494638")
-                val isVideo = ext in listOf("mp4", "mkv", "3gp", "avi", "mov")
-                val isAudio = ext in listOf("mp3", "wav", "ogg", "flac", "aac", "m4a") || hexHeader.startsWith("494433")
-                val isDoc = ext in listOf("pdf", "txt", "doc", "docx", "xls", "xlsx", "ppt", "pptx") || hexHeader.startsWith("25504446") || hexHeader.startsWith("504B0304")
-                
+                val (type, magic) = detectFileType(file, hexHeader)
+
                 val matchesType = when (scanType) {
-                    "PHOTOS" -> isPhoto
-                    "VIDEOS" -> isVideo
-                    "AUDIOS" -> isAudio
-                    "DOCUMENTS" -> isDoc
+                    "PHOTOS" -> type == "PHOTO"
+                    "VIDEOS" -> type == "VIDEO"
+                    "AUDIOS" -> type == "AUDIO"
+                    "DOCUMENTS" -> type == "DOCUMENT"
                     else -> true // FULL scan
                 }
-                
+
                 if (matchesType && file.length() > 0) {
-                    val type = when {
-                        isPhoto -> "PHOTO"
-                        isVideo -> "VIDEO"
-                        isAudio -> "AUDIO"
-                        else -> "DOCUMENT"
-                    }
-                    
-                    val magic = when {
-                        hexHeader.startsWith("89504E47") -> "PNG Image (0x89504E47)"
-                        hexHeader.startsWith("FFD8FF") -> "JPEG Image (0xFFD8FF)"
-                        hexHeader.startsWith("47494638") -> "GIF Image (0x47494638)"
-                        hexHeader.startsWith("25504446") -> "PDF Document (0x25504446)"
-                        hexHeader.startsWith("504B0304") -> "ZIP Archive (0x504B0304)"
-                        hexHeader.startsWith("494433") -> "MP3 Audio (0x494433)"
-                        else -> "Metadata Cluster / " + (file.extension.uppercase().ifEmpty { "BIN" })
-                    }
                     
                     // Hidden/temporary files get high "Forensic Recoverability" status
                     val isHiddenOrCache = file.isHidden || file.path.contains("/cache/") || file.name.startsWith(".")
@@ -276,10 +255,10 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
         }
     }
 
-    private fun readFileHeader(file: File): String {
+    private fun readFileHeader(file: File, numBytes: Int = 16): String {
         try {
             if (!file.exists() || file.isDirectory) return ""
-            val bytes = ByteArray(4)
+            val bytes = ByteArray(numBytes)
             val read = file.inputStream().use { fis -> fis.read(bytes) }
             if (read <= 0) return ""
             val sb = java.lang.StringBuilder()
@@ -289,6 +268,77 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
             return sb.toString()
         } catch (e: Exception) {
             return ""
+        }
+    }
+
+    private fun detectFileType(file: File, hexHeader: String): Pair<String, String> {
+        // Check MAGIC HEADERS FIRST (more reliable than extensions)
+        return when {
+            // Images - PNG
+            hexHeader.startsWith("89504E47") -> "PHOTO" to "PNG Image (0x89504E47)"
+            // Images - JPEG
+            hexHeader.startsWith("FFD8FF") -> "PHOTO" to "JPEG Image (0xFFD8FF)"
+            // Images - GIF 87a/89a
+            hexHeader.startsWith("47494638") || hexHeader.startsWith("47494639") -> "PHOTO" to "GIF Image"
+            // Images - BMP
+            hexHeader.startsWith("424D") -> "PHOTO" to "BMP Image (0x424D)"
+            // Images - TIFF (Intel byte order)
+            hexHeader.startsWith("49492A00") -> "PHOTO" to "TIFF Image (Intel)"
+            // Images - TIFF (Motorola byte order)
+            hexHeader.startsWith("4D4D002A") -> "PHOTO" to "TIFF Image (Motorola)"
+            // Images - WebP
+            hexHeader.startsWith("52494646") && hexHeader.contains("57454250") -> "PHOTO" to "WebP Image"
+
+            // Videos - MP4 container
+            hexHeader.contains("667479") -> "VIDEO" to "MP4 Container"
+            // Videos - Matroska
+            hexHeader.startsWith("1A45DFA3") -> "VIDEO" to "Matroska Container"
+            // Videos - AVI
+            hexHeader.startsWith("52494646") && hexHeader.contains("41564920") -> "VIDEO" to "AVI Container"
+
+            // Audio - MP3 with ID3 tag
+            hexHeader.startsWith("494433") -> "AUDIO" to "MP3 Audio (ID3)"
+            // Audio - MP3 frame sync
+            hexHeader.startsWith("FFFB") || hexHeader.startsWith("FFFA") -> "AUDIO" to "MP3 Audio"
+            // Audio - WAV
+            hexHeader.startsWith("5249464641564541") -> "AUDIO" to "WAV Audio"
+            // Audio - Ogg Vorbis
+            hexHeader.startsWith("4F676753") -> "AUDIO" to "Ogg Vorbis"
+            // Audio - FLAC
+            hexHeader.startsWith("664C6143") -> "AUDIO" to "FLAC Audio"
+            // Audio - M4A (AAC in MP4 container)
+            hexHeader.contains("667479") && file.extension.lowercase() == "m4a" -> "AUDIO" to "AAC Audio (M4A)"
+
+            // Documents - PDF
+            hexHeader.startsWith("25504446") -> "DOCUMENT" to "PDF Document (0x25504446)"
+            // Documents - ZIP archive
+            hexHeader.startsWith("504B0304") -> "DOCUMENT" to "ZIP Archive (0x504B0304)"
+            // Documents - OLE (DOC, XLS)
+            hexHeader.startsWith("D0CF11E0") -> "DOCUMENT" to "OLE Document (DOC/XLS)"
+            // Documents - Office Open XML (DOCX, XLSX, PPTX)
+            hexHeader.startsWith("504B0304") -> "DOCUMENT" to "Office Document (DOCX/XLSX/PPTX)"
+
+            // Fallback to extension-based detection
+            else -> {
+                val ext = file.extension.lowercase()
+                when {
+                    ext in listOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "tif") -> {
+                        "PHOTO" to "Image (${ext.uppercase()})"
+                    }
+                    ext in listOf("mp4", "mkv", "3gp", "avi", "mov", "flv", "wmv", "webm") -> {
+                        "VIDEO" to "Video (${ext.uppercase()})"
+                    }
+                    ext in listOf("mp3", "wav", "ogg", "flac", "aac", "m4a", "wma", "opus") -> {
+                        "AUDIO" to "Audio (${ext.uppercase()})"
+                    }
+                    ext in listOf("pdf", "txt", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "rtf") -> {
+                        "DOCUMENT" to "Document (${ext.uppercase()})"
+                    }
+                    else -> {
+                        "DOCUMENT" to "Unknown Type (${ext.uppercase().ifEmpty { "BIN" }})"
+                    }
+                }
+            }
         }
     }
 

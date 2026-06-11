@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.RecoveredFile
 import com.example.data.RecoveryRepository
 import com.example.data.ScanHistory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,11 +44,19 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
 
     private var scanJob: kotlinx.coroutines.Job? = null
     private val recoveryMutex = Mutex()
+    private val discoveredMutex = Mutex()
 
     fun cancelScan() {
         scanJob?.cancel()
         _scanState.value = ScanState.CANCELLED
         _currentScanningPath.value = "Scan cancelled by user."
+        // Clear discovered state to prevent stale reads from pacing loop
+        viewModelScope.launch {
+            discoveredMutex.withLock {
+                _foundFiles.value = emptyList()
+                _totalBytesScanned.value = 0L
+            }
+        }
     }
 
     private val _scanState = MutableStateFlow(ScanState.IDLE)
@@ -116,10 +125,10 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
             _selectedFileIds.value = emptySet()
             _totalBytesScanned.value = 0L
             _currentScanningPath.value = "Initializing forensic deep scanner..."
-            
+
             val startTime = System.currentTimeMillis()
             val discovered = mutableListOf<ScannedFile>()
-            
+
             // 1. Scan app-specific cache and files (guaranteed accessible)
             val searchPaths = mutableListOf<File>()
             try {
@@ -136,7 +145,7 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
                 try {
                     val extDir = Environment.getExternalStorageDirectory()
                     searchPaths.add(extDir)
-                    
+
                     // Add standard multimedia blocks
                     val dcim = File(extDir, "DCIM")
                     if (dcim.exists()) searchPaths.add(dcim)
@@ -149,31 +158,40 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
                 }
             }
 
-            // Perform active scan
-            withContext(Dispatchers.IO) {
-                val visited = mutableSetOf<String>()
-                for (root in searchPaths) {
-                    if (_scanState.value != ScanState.SCANNING) break
-                    scanDirectoryRecursive(root, scanType, discovered, 0, visited)
+            // Perform active scan with proper cancellation handling
+            try {
+                withContext(Dispatchers.IO) {
+                    val visited = mutableSetOf<String>()
+                    for (root in searchPaths) {
+                        if (_scanState.value != ScanState.SCANNING) break
+                        scanDirectoryRecursive(root, scanType, discovered, 0, visited)
+                    }
                 }
+            } catch (e: CancellationException) {
+                discoveredMutex.withLock {
+                    discovered.clear()
+                    _foundFiles.value = emptyList()
+                }
+                throw e
             }
 
-            // 3. (Removed fake deleted sectors injection)
-
-            // Dynamic presentation: Pace search results rapidly like real antivirus/forensics
-            val paceList = mutableListOf<ScannedFile>()
-            for (file in discovered) {
-                _totalBytesScanned.value += file.sizeBytes
-                _currentScanningPath.value = file.path
-                paceList.add(file)
-                _foundFiles.value = paceList.toList()
-                // Fast updates
-                delay(if (discovered.size > 20) 40 else 80)
+            // Dynamic presentation: Pace search results rapidly with thread-safe access
+            discoveredMutex.withLock {
+                val paceList = mutableListOf<ScannedFile>()
+                for (file in discovered) {
+                    if (_scanState.value != ScanState.SCANNING) break
+                    _totalBytesScanned.value += file.sizeBytes
+                    _currentScanningPath.value = file.path
+                    paceList.add(file)
+                    _foundFiles.value = paceList.toList()
+                    // Fast updates
+                    delay(if (discovered.size > 20) 40 else 80)
+                }
             }
 
             val endTime = System.currentTimeMillis()
             val duration = endTime - startTime
-            
+
             _currentScanningPath.value = "Finished indexing storage clusters."
             _scanState.value = ScanState.FINISHED
 
@@ -392,18 +410,32 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
     }
 
     private fun getUniqueRecoveredFile(directory: File, originalName: String): File {
-        var file = File(directory, "Recovered_$originalName")
-        if (!file.exists()) return file
-        
         val baseName = originalName.substringBeforeLast(".")
         val extension = originalName.substringAfterLast(".", "")
         val suffix = if (extension.isNotEmpty()) ".$extension" else ""
-        
-        var counter = 1
-        while (file.exists()) {
-            file = File(directory, "Recovered_${baseName}_($counter)$suffix")
+
+        var counter = 0
+        var file: File
+        var created = false
+        var maxAttempts = 10000
+
+        do {
+            file = if (counter == 0) {
+                File(directory, "Recovered_$originalName")
+            } else {
+                File(directory, "Recovered_${baseName}_($counter)$suffix")
+            }
             counter++
-        }
+
+            // Use atomic createNewFile() - returns true only if file didn't exist and was created
+            try {
+                created = file.createNewFile()
+            } catch (e: Exception) {
+                // If creation fails, try next name
+                created = false
+            }
+        } while (!created && counter < maxAttempts)
+
         return file
     }
 

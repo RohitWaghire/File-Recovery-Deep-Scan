@@ -342,7 +342,7 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
                             actualRecoveredCount++
                         }
                     }
-                    updateHistoryWithRecovery(actualRecoveredCount)
+                    updateHistoryWithRecovery(actualRecoveredCount, "BATCH_RECOVERY")
                 }
 
                 // Pause for realistic sector-block writing and user feedback loop
@@ -394,7 +394,7 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
                                 recoveredPath = destFile.absolutePath
                             )
                         )
-                        updateHistoryWithRecovery(1)
+                        updateHistoryWithRecovery(1, "SINGLE_RECOVERY")
                     }
                 }
                 delay(800)
@@ -439,16 +439,28 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
         return file
     }
 
-    private suspend fun updateHistoryWithRecovery(recoveredCount: Int) {
+    private suspend fun updateHistoryWithRecovery(recoveredCount: Int, scanType: String = "MANUAL_RECOVERY") {
         if (recoveredCount <= 0) return
         try {
             val latest = repository.getLatestScanHistory()
             if (latest != null) {
+                // Update existing scan history
                 val updated = latest.copy(filesRecovered = latest.filesRecovered + recoveredCount)
-                repository.insertScanHistory(updated)
+                repository.updateScanHistory(updated)
+            } else {
+                // No prior scan history - create new entry for manual recovery
+                repository.insertScanHistory(
+                    ScanHistory(
+                        scanType = scanType,
+                        durationMs = 0,
+                        filesFound = 0,
+                        filesRecovered = recoveredCount
+                    )
+                )
             }
         } catch (e: Exception) {
-            // Muted
+            // Log error for debugging (in production, use Timber or similar)
+            e.printStackTrace()
         }
     }
 

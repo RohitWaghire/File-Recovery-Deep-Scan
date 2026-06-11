@@ -370,95 +370,62 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
     fun recoverSelectedFiles(context: Context, onSuccess: (Int) -> Unit) {
         viewModelScope.launch {
             if (_selectedFileIds.value.isEmpty()) return@launch
-            recoveryMutex.withLock {
-                _isRecovering.value = true
-                
-                val selectedFiles = _foundFiles.value.filter { _selectedFileIds.value.contains(it.id) }
-                var actualRecoveredCount = 0
-                
-                // Set up local physical "Recovered" folder
-                val recoveredDir = File(context.getExternalFilesDir(null), "RecoveredFiles")
-                if (!recoveredDir.exists()) {
-                    recoveredDir.mkdirs()
-                }
-
-                withContext(Dispatchers.IO) {
-                    for (scannedFile in selectedFiles) {
-                        val destFile = getUniqueRecoveredFile(recoveredDir, scannedFile.name)
-                        var copySuccess = false
-                        
-                        if (scannedFile.isReal) {
-                            try {
-                                val srcFile = File(scannedFile.path)
-                                if (srcFile.exists()) {
-                                    srcFile.inputStream().use { input ->
-                                        destFile.outputStream().use { output ->
-                                            input.copyTo(output)
-                                        }
-                                    }
-                                    copySuccess = destFile.exists() && destFile.length() > 0
-                                }
-                            } catch (e: Exception) {
-                                copySuccess = false
-                            }
-                        }
-
-                        if (copySuccess) {
-                            // Logging into Room DB for secure validation
-                            repository.insertRecoveredFile(
-                                RecoveredFile(
-                                    fileName = destFile.name,
-                                    fileType = scannedFile.type,
-                                    sizeBytes = scannedFile.sizeBytes,
-                                    originalPath = scannedFile.path,
-                                    recoveredPath = destFile.absolutePath
-                                )
-                            )
-                            actualRecoveredCount++
-                        }
-                    }
-                    updateHistoryWithRecovery(actualRecoveredCount, "BATCH_RECOVERY")
-                }
-
-                // Pause for realistic sector-block writing and user feedback loop
-                delay(1200)
-                
-                _recoveredCount.value += actualRecoveredCount
+            val selectedFiles = _foundFiles.value.filter { _selectedFileIds.value.contains(it.id) }
+            performRecovery(context, selectedFiles, "BATCH_RECOVERY", 1200) { recoveredCount ->
                 _selectedFileIds.value = emptySet()
-                _isRecovering.value = false
-                
-                onSuccess(actualRecoveredCount)
+                onSuccess(recoveredCount)
             }
         }
     }
 
     fun recoverSingleFile(context: Context, scannedFile: ScannedFile, onSuccess: () -> Unit) {
         viewModelScope.launch {
-            recoveryMutex.withLock {
-                _isRecovering.value = true
-                val recoveredDir = File(context.getExternalFilesDir(null), "RecoveredFiles")
-                if (!recoveredDir.exists()) {
-                    recoveredDir.mkdirs()
+            performRecovery(context, listOf(scannedFile), "SINGLE_RECOVERY", 800) { recoveredCount ->
+                if (recoveredCount > 0) {
+                    onSuccess()
                 }
-                var copySuccess = false
-                val destFile = getUniqueRecoveredFile(recoveredDir, scannedFile.name)
-                
-                withContext(Dispatchers.IO) {
-                    if (scannedFile.isReal) {
-                        try {
-                            val srcFile = File(scannedFile.path)
-                            if (srcFile.exists()) {
-                                srcFile.inputStream().use { input ->
-                                    destFile.outputStream().use { output ->
-                                        input.copyTo(output)
-                                    }
+            }
+        }
+    }
+
+    private suspend fun performRecovery(
+        context: Context,
+        filesToRecover: List<ScannedFile>,
+        recoveryType: String,
+        delayMs: Long,
+        onComplete: (Int) -> Unit
+    ) {
+        recoveryMutex.withLock {
+            _isRecovering.value = true
+
+            val recoveredDir = File(context.getExternalFilesDir(null), "RecoveredFiles")
+            if (!recoveredDir.exists()) {
+                recoveredDir.mkdirs()
+            }
+
+            var actualRecoveredCount = 0
+
+            withContext(Dispatchers.IO) {
+                for (scannedFile in filesToRecover) {
+                    if (!scannedFile.isReal) continue
+
+                    val destFile = getUniqueRecoveredFile(recoveredDir, scannedFile.name)
+                    var copySuccess = false
+
+                    try {
+                        val srcFile = File(scannedFile.path)
+                        if (srcFile.exists()) {
+                            srcFile.inputStream().use { input ->
+                                destFile.outputStream().use { output ->
+                                    input.copyTo(output)
                                 }
-                                copySuccess = destFile.exists() && destFile.length() > 0
                             }
-                        } catch (e: Exception) {
-                            copySuccess = false
+                            copySuccess = destFile.exists() && destFile.length() > 0
                         }
+                    } catch (e: Exception) {
+                        copySuccess = false
                     }
+
                     if (copySuccess) {
                         repository.insertRecoveredFile(
                             RecoveredFile(
@@ -469,18 +436,17 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
                                 recoveredPath = destFile.absolutePath
                             )
                         )
-                        updateHistoryWithRecovery(1, "SINGLE_RECOVERY")
+                        actualRecoveredCount++
                     }
                 }
-                delay(800)
-                if (copySuccess) {
-                    _recoveredCount.value += 1
-                }
-                _isRecovering.value = false
-                if (copySuccess) {
-                    onSuccess()
-                }
+                updateHistoryWithRecovery(actualRecoveredCount, recoveryType)
             }
+
+            delay(delayMs)
+            _recoveredCount.value += actualRecoveredCount
+            _isRecovering.value = false
+
+            onComplete(actualRecoveredCount)
         }
     }
 

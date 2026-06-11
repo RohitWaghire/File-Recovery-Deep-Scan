@@ -15,15 +15,15 @@ abstract class RecoveryDatabase : RoomDatabase() {
 
         fun getDatabase(context: Context): RecoveryDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
+                // Double-check locking pattern: check again inside synchronized block
+                INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     RecoveryDatabase::class.java,
                     "recovery_database"
                 )
                 .fallbackToDestructiveMigration(true)
                 .build()
-                INSTANCE = instance
-                instance
+                .also { INSTANCE = it }
             }
         }
     }

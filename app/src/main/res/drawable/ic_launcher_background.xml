@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Outer Deep Space Obsidian Canvas -->
+    <path
+        android:fillColor="#0B0F19"
+        android:pathData="M0,0h108v108h-108z" />
+        
+    <!-- Blueprint Digital Forensic Grid Overlay -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M18,0 L18,108 M36,0 L36,108 M54,0 L54,108 M72,0 L72,108 M90,0 L90,108"
+        android:strokeWidth="0.5"
+        android:strokeColor="#1506B6D4" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,18 L108,18 M0,36 L108,36 M0,54 L108,54 M0,72 L108,72 M0,90 L108,90"
+        android:strokeWidth="0.5"
+        android:strokeColor="#1506B6D4" />
+        
+    <!-- Futuristic Concentric Diagnostic Rings -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,54 m-42,0 a42,42 0 1,1 84,0 a42,42 0 1,1 -84,0"
+        android:strokeWidth="1.2"
+        android:strokeColor="#1006B6D4" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,54 m-30,0 a30,30 0 1,1 60,0 a30,30 0 1,1 -60,0"
+        android:strokeWidth="0.8"
+        android:strokeColor="#1006B6D4" />
+</vector>

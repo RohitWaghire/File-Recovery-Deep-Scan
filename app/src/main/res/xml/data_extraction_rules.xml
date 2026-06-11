@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="database" path="recovery_database" />
+        <exclude domain="external" path="RecoveredFiles" />
+        <exclude domain="file" path="RecoveredFiles" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="database" path="recovery_database" />
+        <exclude domain="external" path="RecoveredFiles" />
+        <exclude domain="file" path="RecoveredFiles" />
+    </device-transfer>
+</data-extraction-rules>

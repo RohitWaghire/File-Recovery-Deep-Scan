@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Pointy-Topped Rounded Hexagon with Blue Gradient Layer -->
+    <path
+        android:pathData="M 50,18.3 Q 54,16 58,18.3 L 84,33.3 Q 87,35 87,38 L 87,70 Q 87,73 84,74.7 L 58,89.7 Q 54,92 50,89.7 L 24,74.7 Q 21,73 21,70 L 21,38 Q 21,35 24,33.3 L 50,18.3 Z">
+        <gradient
+            android:startX="21"
+            android:startY="16"
+            android:endX="87"
+            android:endY="92"
+            android:type="linear">
+            <item android:offset="0.0" android:color="#4CA4FF" />
+            <item android:offset="0.5" android:color="#1E88E5" />
+            <item android:offset="1.0" android:color="#0B5AD1" />
+        </gradient>
+    </path>
+
+    <!-- Inner Subtle Glow or Shading for Hexagon Thickness -->
+    <path
+        android:pathData="M 50.8,20.0 Q 54,18.1 57.2,20.0 L 82.2,34.4 Q 85,36 85,38.7 L 85,67.3 Q 85,70 82.2,71.6 L 57.2,86.0 Q 54,87.9 50.8,86.0 L 25.8,71.6 Q 23,70 23,67.3 L 23,38.7 Q 23,36 25.8,34.4 L 50.8,20.0 Z"
+        android:fillColor="#15FFFFFF" />
+
+    <!-- Pure White Recovery Arrow (Mathematics-based Curve) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 34,56 A 20,20 0 1,0 54,36 L 36,46 L 54,52 L 54,44 A 12,12 0 1,1 42,56 Z" />
+</vector>

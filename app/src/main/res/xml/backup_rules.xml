@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="database" path="recovery_database" />
+    <exclude domain="external" path="RecoveredFiles" />
+    <exclude domain="file" path="RecoveredFiles" />
+</full-backup-content>

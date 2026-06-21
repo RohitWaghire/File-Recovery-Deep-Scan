@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.RecoveredFile
 import com.example.data.RecoveryRepository
 import com.example.data.ScanHistory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,14 +41,27 @@ enum class ScanState {
 }
 
 class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel() {
+    companion object {
+        // Memory optimization constants
+        private const val MAX_FILES_IN_MEMORY = 5000
+        private const val BATCH_UI_UPDATE_SIZE = 50
+    }
 
     private var scanJob: kotlinx.coroutines.Job? = null
     private val recoveryMutex = Mutex()
+    private val discoveredMutex = Mutex()
 
     fun cancelScan() {
         scanJob?.cancel()
         _scanState.value = ScanState.CANCELLED
         _currentScanningPath.value = "Scan cancelled by user."
+        // Clear discovered state to prevent stale reads from the pacing loop
+        viewModelScope.launch {
+            discoveredMutex.withLock {
+                _foundFiles.value = emptyList()
+                _totalBytesScanned.value = 0L
+            }
+        }
     }
 
     private val _scanState = MutableStateFlow(ScanState.IDLE)
@@ -154,26 +168,44 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
                 }
             }
 
-            // Perform active scan
-            withContext(Dispatchers.IO) {
-                val visited = mutableSetOf<String>()
-                for (root in searchPaths) {
-                    if (_scanState.value != ScanState.SCANNING) break
-                    scanDirectoryRecursive(root, scanType, discovered, 0, visited)
+            // Perform active scan with proper cancellation handling
+            try {
+                withContext(Dispatchers.IO) {
+                    val visited = mutableSetOf<String>()
+                    for (root in searchPaths) {
+                        if (_scanState.value != ScanState.SCANNING) break
+                        scanDirectoryRecursive(root, scanType, discovered, 0, visited)
+                    }
                 }
+            } catch (e: CancellationException) {
+                discoveredMutex.withLock {
+                    discovered.clear()
+                    _foundFiles.value = emptyList()
+                }
+                throw e
             }
 
-            // 3. (Removed fake deleted sectors injection)
-
-            // Dynamic presentation: Pace search results rapidly like real antivirus/forensics
-            val paceList = mutableListOf<ScannedFile>()
-            for (file in discovered) {
-                _totalBytesScanned.value += file.sizeBytes
-                _currentScanningPath.value = file.path
-                paceList.add(file)
-                _foundFiles.value = paceList.toList()
-                // Fast updates
-                delay(if (discovered.size > 20) 40 else 80)
+            // Dynamic presentation: Pace results in batches (thread-safe, memory-aware)
+            discoveredMutex.withLock {
+                val paceList = mutableListOf<ScannedFile>()
+                var batchCount = 0
+                for ((index, file) in discovered.withIndex()) {
+                    if (_scanState.value != ScanState.SCANNING) break
+                    _totalBytesScanned.value += file.sizeBytes
+                    _currentScanningPath.value = file.path
+                    paceList.add(file)
+                    batchCount++
+                    // Update UI in batches instead of per-file for better performance
+                    if (batchCount >= BATCH_UI_UPDATE_SIZE || index == discovered.size - 1) {
+                        _foundFiles.value = _foundFiles.value + paceList.toList()
+                        paceList.clear()
+                        batchCount = 0
+                        delay(100)
+                    }
+                }
+                if (paceList.isNotEmpty()) {
+                    _foundFiles.value = _foundFiles.value + paceList
+                }
             }
 
             val endTime = System.currentTimeMillis()
@@ -196,57 +228,39 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
 
     private fun scanDirectoryRecursive(dir: File, scanType: String, outputList: MutableList<ScannedFile>, depth: Int = 0, visited: MutableSet<String>) {
         if (!dir.exists() || !dir.isDirectory || depth > 10) return
+        // Bound memory: stop collecting once the cap is reached to avoid OOM on huge filesystems
+        if (outputList.size >= MAX_FILES_IN_MEMORY) return
         val canonicalPath = try { dir.canonicalPath } catch (e: Exception) { dir.absolutePath }
         if (!visited.add(canonicalPath)) return
         val list = dir.listFiles() ?: return
-        
+
         for (file in list) {
             if (_scanState.value != ScanState.SCANNING) break
-            
+            // Bound memory: stop once the in-memory cap is reached
+            if (outputList.size >= MAX_FILES_IN_MEMORY) break
+
             if (file.isDirectory) {
                 // Ignore standard skip directories to avoid hanging under heavy Android frameworks
                 val dName = file.name
                 if (dName.startsWith(".") || dName.equals("Android", ignoreCase = true) || file.path.contains("/Android/data") || file.path.contains("/Android/obb")) continue
                 scanDirectoryRecursive(file, scanType, outputList, depth + 1, visited)
             } else {
-                val ext = file.extension.lowercase()
                 val hexHeader = readFileHeader(file)
-                
-                val isPhoto = ext in listOf("jpg", "jpeg", "png", "webp", "gif", "bmp") || hexHeader.startsWith("89504E47") || hexHeader.startsWith("FFD8FF") || hexHeader.startsWith("47494638")
-                val isVideo = ext in listOf("mp4", "mkv", "3gp", "avi", "mov")
-                val isAudio = ext in listOf("mp3", "wav", "ogg", "flac", "aac", "m4a") || hexHeader.startsWith("494433")
-                val isDoc = ext in listOf("pdf", "txt", "doc", "docx", "xls", "xlsx", "ppt", "pptx") || hexHeader.startsWith("25504446") || hexHeader.startsWith("504B0304")
-                
+                val (type, magic) = detectFileType(file, hexHeader)
+
                 val matchesType = when (scanType) {
-                    "PHOTOS" -> isPhoto
-                    "VIDEOS" -> isVideo
-                    "AUDIOS" -> isAudio
-                    "DOCUMENTS" -> isDoc
+                    "PHOTOS" -> type == "PHOTO"
+                    "VIDEOS" -> type == "VIDEO"
+                    "AUDIOS" -> type == "AUDIO"
+                    "DOCUMENTS" -> type == "DOCUMENT"
                     else -> true // FULL scan
                 }
-                
+
                 if (matchesType && file.length() > 0) {
-                    val type = when {
-                        isPhoto -> "PHOTO"
-                        isVideo -> "VIDEO"
-                        isAudio -> "AUDIO"
-                        else -> "DOCUMENT"
-                    }
-                    
-                    val magic = when {
-                        hexHeader.startsWith("89504E47") -> "PNG Image (0x89504E47)"
-                        hexHeader.startsWith("FFD8FF") -> "JPEG Image (0xFFD8FF)"
-                        hexHeader.startsWith("47494638") -> "GIF Image (0x47494638)"
-                        hexHeader.startsWith("25504446") -> "PDF Document (0x25504446)"
-                        hexHeader.startsWith("504B0304") -> "ZIP Archive (0x504B0304)"
-                        hexHeader.startsWith("494433") -> "MP3 Audio (0x494433)"
-                        else -> "Metadata Cluster / " + (file.extension.uppercase().ifEmpty { "BIN" })
-                    }
-                    
                     // Hidden/temporary files get high "Forensic Recoverability" status
                     val isHiddenOrCache = file.isHidden || file.path.contains("/cache/") || file.name.startsWith(".")
                     val baseRecoverability = if (isHiddenOrCache) 0.98f else 0.72f
-                    
+
                     val scannedFile = ScannedFile(
                         name = file.name,
                         path = file.absolutePath,
@@ -263,10 +277,10 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
         }
     }
 
-    private fun readFileHeader(file: File): String {
+    private fun readFileHeader(file: File, numBytes: Int = 16): String {
         try {
             if (!file.exists() || file.isDirectory) return ""
-            val bytes = ByteArray(4)
+            val bytes = ByteArray(numBytes)
             val read = file.inputStream().use { fis -> fis.read(bytes) }
             if (read <= 0) return ""
             val sb = java.lang.StringBuilder()
@@ -279,98 +293,102 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
         }
     }
 
+    private fun detectFileType(file: File, hexHeader: String): Pair<String, String> {
+        // Check MAGIC HEADERS FIRST (more reliable than extensions)
+        return when {
+            hexHeader.startsWith("89504E47") -> "PHOTO" to "PNG Image (0x89504E47)"
+            hexHeader.startsWith("FFD8FF") -> "PHOTO" to "JPEG Image (0xFFD8FF)"
+            hexHeader.startsWith("47494638") || hexHeader.startsWith("47494639") -> "PHOTO" to "GIF Image"
+            hexHeader.startsWith("424D") -> "PHOTO" to "BMP Image (0x424D)"
+            hexHeader.startsWith("49492A00") -> "PHOTO" to "TIFF Image (Intel)"
+            hexHeader.startsWith("4D4D002A") -> "PHOTO" to "TIFF Image (Motorola)"
+            hexHeader.startsWith("52494646") && hexHeader.contains("57454250") -> "PHOTO" to "WebP Image"
+            hexHeader.startsWith("1A45DFA3") -> "VIDEO" to "Matroska Container"
+            hexHeader.startsWith("52494646") && hexHeader.contains("41564920") -> "VIDEO" to "AVI Container"
+            hexHeader.contains("66747970") -> "VIDEO" to "MP4 Container"
+            hexHeader.startsWith("494433") -> "AUDIO" to "MP3 Audio (ID3)"
+            hexHeader.startsWith("FFFB") || hexHeader.startsWith("FFFA") -> "AUDIO" to "MP3 Audio"
+            hexHeader.startsWith("664C6143") -> "AUDIO" to "FLAC Audio"
+            hexHeader.startsWith("4F676753") -> "AUDIO" to "Ogg Vorbis"
+            hexHeader.startsWith("25504446") -> "DOCUMENT" to "PDF Document (0x25504446)"
+            hexHeader.startsWith("504B0304") -> "DOCUMENT" to "Office/ZIP Archive (0x504B0304)"
+            hexHeader.startsWith("D0CF11E0") -> "DOCUMENT" to "OLE Document (DOC/XLS)"
+            else -> {
+                val ext = file.extension.lowercase()
+                when {
+                    ext in listOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "tif") ->
+                        "PHOTO" to "Image (${ext.uppercase()})"
+                    ext in listOf("mp4", "mkv", "3gp", "avi", "mov", "flv", "wmv", "webm") ->
+                        "VIDEO" to "Video (${ext.uppercase()})"
+                    ext in listOf("mp3", "wav", "ogg", "flac", "aac", "m4a", "wma", "opus") ->
+                        "AUDIO" to "Audio (${ext.uppercase()})"
+                    ext in listOf("pdf", "txt", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "rtf") ->
+                        "DOCUMENT" to "Document (${ext.uppercase()})"
+                    else -> "DOCUMENT" to "Metadata Cluster / ${ext.uppercase().ifEmpty { "BIN" }}"
+                }
+            }
+        }
+    }
+
     fun recoverSelectedFiles(context: Context, onSuccess: (Int) -> Unit) {
         viewModelScope.launch {
             if (_selectedFileIds.value.isEmpty()) return@launch
-            recoveryMutex.withLock {
-                _isRecovering.value = true
-                
-                val selectedFiles = _foundFiles.value.filter { _selectedFileIds.value.contains(it.id) }
-                var actualRecoveredCount = 0
-                
-                // Set up local physical "Recovered" folder
-                val recoveredDir = File(context.getExternalFilesDir(null), "RecoveredFiles")
-                if (!recoveredDir.exists()) {
-                    recoveredDir.mkdirs()
-                }
-
-                withContext(Dispatchers.IO) {
-                    for (scannedFile in selectedFiles) {
-                        val destFile = getUniqueRecoveredFile(recoveredDir, scannedFile.name)
-                        var copySuccess = false
-                        
-                        if (scannedFile.isReal) {
-                            try {
-                                val srcFile = File(scannedFile.path)
-                                if (srcFile.exists()) {
-                                    srcFile.inputStream().use { input ->
-                                        destFile.outputStream().use { output ->
-                                            input.copyTo(output)
-                                        }
-                                    }
-                                    copySuccess = destFile.exists() && destFile.length() > 0
-                                }
-                            } catch (e: Exception) {
-                                copySuccess = false
-                            }
-                        }
-
-                        if (copySuccess) {
-                            // Logging into Room DB for secure validation
-                            repository.insertRecoveredFile(
-                                RecoveredFile(
-                                    fileName = destFile.name,
-                                    fileType = scannedFile.type,
-                                    sizeBytes = scannedFile.sizeBytes,
-                                    originalPath = scannedFile.path,
-                                    recoveredPath = destFile.absolutePath
-                                )
-                            )
-                            actualRecoveredCount++
-                        }
-                    }
-                    updateHistoryWithRecovery(actualRecoveredCount)
-                }
-
-                // Pause for realistic sector-block writing and user feedback loop
-                delay(1200)
-                
-                _recoveredCount.value += actualRecoveredCount
+            val selectedFiles = _foundFiles.value.filter { _selectedFileIds.value.contains(it.id) }
+            performRecovery(context, selectedFiles, "BATCH_RECOVERY", 1200) { recoveredCount ->
                 _selectedFileIds.value = emptySet()
-                _isRecovering.value = false
-                
-                onSuccess(actualRecoveredCount)
+                onSuccess(recoveredCount)
             }
         }
     }
 
     fun recoverSingleFile(context: Context, scannedFile: ScannedFile, onSuccess: () -> Unit) {
         viewModelScope.launch {
-            recoveryMutex.withLock {
-                _isRecovering.value = true
-                val recoveredDir = File(context.getExternalFilesDir(null), "RecoveredFiles")
-                if (!recoveredDir.exists()) {
-                    recoveredDir.mkdirs()
+            performRecovery(context, listOf(scannedFile), "SINGLE_RECOVERY", 800) { recoveredCount ->
+                if (recoveredCount > 0) {
+                    onSuccess()
                 }
-                var copySuccess = false
-                val destFile = getUniqueRecoveredFile(recoveredDir, scannedFile.name)
-                
-                withContext(Dispatchers.IO) {
-                    if (scannedFile.isReal) {
-                        try {
-                            val srcFile = File(scannedFile.path)
-                            if (srcFile.exists()) {
-                                srcFile.inputStream().use { input ->
-                                    destFile.outputStream().use { output ->
-                                        input.copyTo(output)
-                                    }
+            }
+        }
+    }
+
+    private suspend fun performRecovery(
+        context: Context,
+        filesToRecover: List<ScannedFile>,
+        recoveryType: String,
+        delayMs: Long,
+        onComplete: (Int) -> Unit
+    ) {
+        recoveryMutex.withLock {
+            _isRecovering.value = true
+
+            val recoveredDir = File(context.getExternalFilesDir(null), "RecoveredFiles")
+            if (!recoveredDir.exists()) {
+                recoveredDir.mkdirs()
+            }
+
+            var actualRecoveredCount = 0
+
+            withContext(Dispatchers.IO) {
+                for (scannedFile in filesToRecover) {
+                    if (!scannedFile.isReal) continue
+
+                    val destFile = getUniqueRecoveredFile(recoveredDir, scannedFile.name)
+                    var copySuccess = false
+
+                    try {
+                        val srcFile = File(scannedFile.path)
+                        if (srcFile.exists()) {
+                            srcFile.inputStream().use { input ->
+                                destFile.outputStream().use { output ->
+                                    input.copyTo(output)
                                 }
-                                copySuccess = destFile.exists() && destFile.length() > 0
                             }
-                        } catch (e: Exception) {
-                            copySuccess = false
+                            copySuccess = destFile.exists() && destFile.length() > 0
                         }
+                    } catch (e: Exception) {
+                        copySuccess = false
                     }
+
                     if (copySuccess) {
                         repository.insertRecoveredFile(
                             RecoveredFile(
@@ -381,47 +399,68 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
                                 recoveredPath = destFile.absolutePath
                             )
                         )
-                        updateHistoryWithRecovery(1)
+                        actualRecoveredCount++
                     }
                 }
-                delay(800)
-                if (copySuccess) {
-                    _recoveredCount.value += 1
-                }
-                _isRecovering.value = false
-                if (copySuccess) {
-                    onSuccess()
-                }
+                updateHistoryWithRecovery(actualRecoveredCount, recoveryType)
             }
+
+            delay(delayMs)
+            _recoveredCount.value += actualRecoveredCount
+            _isRecovering.value = false
+
+            onComplete(actualRecoveredCount)
         }
     }
 
     private fun getUniqueRecoveredFile(directory: File, originalName: String): File {
-        var file = File(directory, "Recovered_$originalName")
-        if (!file.exists()) return file
-        
         val baseName = originalName.substringBeforeLast(".")
         val extension = originalName.substringAfterLast(".", "")
         val suffix = if (extension.isNotEmpty()) ".$extension" else ""
-        
-        var counter = 1
-        while (file.exists()) {
-            file = File(directory, "Recovered_${baseName}_($counter)$suffix")
+
+        var counter = 0
+        var file: File
+        var created = false
+        val maxAttempts = 10000
+
+        do {
+            file = if (counter == 0) {
+                File(directory, "Recovered_$originalName")
+            } else {
+                File(directory, "Recovered_${baseName}_($counter)$suffix")
+            }
             counter++
-        }
+            // Atomic create: returns true only if the file did not exist and was created
+            try {
+                created = file.createNewFile()
+            } catch (e: Exception) {
+                created = false
+            }
+        } while (!created && counter < maxAttempts)
+
         return file
     }
 
-    private suspend fun updateHistoryWithRecovery(recoveredCount: Int) {
+    private suspend fun updateHistoryWithRecovery(recoveredCount: Int, scanType: String = "MANUAL_RECOVERY") {
         if (recoveredCount <= 0) return
         try {
             val latest = repository.getLatestScanHistory()
             if (latest != null) {
                 val updated = latest.copy(filesRecovered = latest.filesRecovered + recoveredCount)
-                repository.insertScanHistory(updated)
+                repository.updateScanHistory(updated)
+            } else {
+                // No prior scan history - create a new entry so the count is not lost
+                repository.insertScanHistory(
+                    ScanHistory(
+                        scanType = scanType,
+                        durationMs = 0,
+                        filesFound = 0,
+                        filesRecovered = recoveredCount
+                    )
+                )
             }
         } catch (e: Exception) {
-            // Muted
+            e.printStackTrace()
         }
     }
 

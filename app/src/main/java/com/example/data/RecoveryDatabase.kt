@@ -15,7 +15,7 @@ abstract class RecoveryDatabase : RoomDatabase() {
 
         fun getDatabase(context: Context): RecoveryDatabase {
             return INSTANCE ?: synchronized(this) {
-                // Double-check locking pattern: check again inside synchronized block
+                // Double-check locking: re-check inside the synchronized block
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     RecoveryDatabase::class.java,

@@ -5,32 +5,63 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     
-    <!-- Outer Deep Space Obsidian Canvas -->
-    <path
-        android:fillColor="#0B0F19"
-        android:pathData="M0,0h108v108h-108z" />
+    <!-- Sophisticated Deep Space Slate-to-Obsidian Dark Gradient Canvas -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <gradient
+            android:startX="0"
+            android:startY="0"
+            android:endX="108"
+            android:endY="108"
+            android:type="linear">
+            <item android:offset="0.0" android:color="#1E293B" />
+            <item android:offset="0.7" android:color="#0F172A" />
+            <item android:offset="1.0" android:color="#030712" />
+        </gradient>
+    </path>
         
-    <!-- Blueprint Digital Forensic Grid Overlay -->
+    <!-- Holographic Forensic Alignment Grids (Centered on 54, 54) -->
     <path
         android:fillColor="#00000000"
         android:pathData="M18,0 L18,108 M36,0 L36,108 M54,0 L54,108 M72,0 L72,108 M90,0 L90,108"
-        android:strokeWidth="0.5"
-        android:strokeColor="#1506B6D4" />
+        android:strokeWidth="0.45"
+        android:strokeColor="#25A8C7FA" />
     <path
         android:fillColor="#00000000"
         android:pathData="M0,18 L108,18 M0,36 L108,36 M0,54 L108,54 M0,72 L108,72 M0,90 L108,90"
-        android:strokeWidth="0.5"
-        android:strokeColor="#1506B6D4" />
+        android:strokeWidth="0.45"
+        android:strokeColor="#25A8C7FA" />
         
-    <!-- Futuristic Concentric Diagnostic Rings -->
+    <!-- Outer Technological Cybernetic Rings -->
     <path
         android:fillColor="#00000000"
-        android:pathData="M54,54 m-42,0 a42,42 0 1,1 84,0 a42,42 0 1,1 -84,0"
+        android:pathData="M54,54 m-45,0 a45,45 0 1,1 90,0 a45,45 0 1,1 -90,0"
         android:strokeWidth="1.2"
-        android:strokeColor="#1006B6D4" />
+        android:strokeColor="#18A8C7FA" />
     <path
         android:fillColor="#00000000"
-        android:pathData="M54,54 m-30,0 a30,30 0 1,1 60,0 a30,30 0 1,1 -60,0"
-        android:strokeWidth="0.8"
-        android:strokeColor="#1006B6D4" />
+        android:pathData="M54,54 m-34,0 a34,34 0 1,1 68,0 a34,34 0 1,1 -68,0"
+        android:strokeWidth="0.7"
+        android:strokeColor="#12A8C7FA" />
+        
+    <!-- Dynamic Corner Focal Vectors -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M 12,20 L 12,12 L 20,12"
+        android:strokeWidth="1.0"
+        android:strokeColor="#30A8C7FA" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M 96,20 L 96,12 L 88,12"
+        android:strokeWidth="1.0"
+        android:strokeColor="#30A8C7FA" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M 12,88 L 12,96 L 20,96"
+        android:strokeWidth="1.0"
+        android:strokeColor="#30A8C7FA" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M 96,88 L 96,96 L 88,96"
+        android:strokeWidth="1.0"
+        android:strokeColor="#30A8C7FA" />
 </vector>

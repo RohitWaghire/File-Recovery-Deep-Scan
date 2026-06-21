@@ -18,11 +18,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
@@ -70,7 +73,8 @@ fun MainDashboard(
     val scanHistory by viewModel.scanHistory.collectAsStateWithLifecycle()
     val recoveredFilesLog by viewModel.recoveredFiles.collectAsStateWithLifecycle()
 
-    var activeTab by remember { mutableIntStateOf(0) } // 0: Scanner, 1: Vault / History, 2: Forensic Guide
+    var activeTab by remember { mutableIntStateOf(0) } // 0: Scanner, 1: Vault / History
+    var showGuide by remember { mutableStateOf(false) }
     var selectedFilter by remember { mutableStateOf("ALL") } // ALL, PHOTO, VIDEO, AUDIO, DOCUMENT
     
     var pendingScanCategory by remember { mutableStateOf<String?>(null) }
@@ -122,12 +126,6 @@ fun MainDashboard(
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = null,
-                            tint = Color(0xFFA8C7FA),
-                            modifier = Modifier.padding(end = 8.dp)
-                        )
                         Text(
                             text = "Recovery Pro",
                             style = MaterialTheme.typography.titleMedium.copy(
@@ -136,6 +134,17 @@ fun MainDashboard(
                                 letterSpacing = 0.5.sp
                             )
                         )
+                    }
+                },
+                actions = {
+                    if (activeTab == 0) {
+                        IconButton(onClick = { showGuide = true }) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "Forensic Guide",
+                                tint = Color(0xFFA8C7FA)
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -174,23 +183,10 @@ fun MainDashboard(
                                 }
                             }
                         }) {
-                            Icon(Icons.Default.List, contentDescription = "Vault")
+                            Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Vault")
                         }
                     },
                     label = { Text("Vault") },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color(0xFF111318),
-                        selectedTextColor = Color(0xFFA8C7FA),
-                        unselectedIconColor = Color(0xFF909094),
-                        unselectedTextColor = Color(0xFF909094),
-                        indicatorColor = Color(0xFFA8C7FA)
-                    )
-                )
-                NavigationBarItem(
-                    selected = activeTab == 2,
-                    onClick = { activeTab = 2 },
-                    icon = { Icon(Icons.Default.Info, contentDescription = "Guide") },
-                    label = { Text("Forensic Info") },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Color(0xFF111318),
                         selectedTextColor = Color(0xFFA8C7FA),
@@ -309,13 +305,23 @@ fun MainDashboard(
                             Toast.makeText(context, "Share failed: ${e.message}", Toast.LENGTH_SHORT).show()
                         }
                     },
-                    onDeleteFile = { id, path -> viewModel.deleteRecoveredState(id, path) },
+                    onDeleteFile = { id, path -> 
+                        viewModel.deleteRecoveredState(id, path)
+                        Toast.makeText(context, "Quick Delete complete.", Toast.LENGTH_SHORT).show()
+                    },
+                    onShredFile = { id, path ->
+                        viewModel.shredRecoveredFile(id, path) {
+                            Toast.makeText(context, "Multi-pass secure shred complete. File overwritten and erased.", Toast.LENGTH_LONG).show()
+                        }
+                    },
                     onClearHistory = { viewModel.clearHistory() },
                     getReadableSize = { viewModel.getReadableSize(it) }
                 )
-                2 -> GuideScreen()
             }
         }
+    }
+    if (showGuide) {
+        ForensicGuideDialog(onDismiss = { showGuide = false })
     }
 }
 
@@ -819,9 +825,9 @@ fun FileCard(
     }
 
     val typeIcon = when (scannedFile.type) {
-        "PHOTO" -> Icons.Default.Star
+        "PHOTO" -> Icons.Default.Favorite
         "VIDEO" -> Icons.Default.PlayArrow
-        "AUDIO" -> Icons.Default.Refresh
+        "AUDIO" -> Icons.Default.PlayArrow
         else -> Icons.Default.Edit
     }
 
@@ -1048,10 +1054,75 @@ fun VaultScreen(
     scanHistory: List<com.example.data.ScanHistory>,
     onShareFile: (String) -> Unit,
     onDeleteFile: (Long, String) -> Unit,
+    onShredFile: (Long, String) -> Unit,
     onClearHistory: () -> Unit,
     getReadableSize: (Long) -> String
 ) {
     var vaultSubTab by remember { mutableIntStateOf(0) } // 0: Recovered Vault, 1: Diagnostic History
+    var activeDeleteTarget by remember { mutableStateOf<com.example.data.RecoveredFile?>(null) }
+
+    if (activeDeleteTarget != null) {
+        val target = activeDeleteTarget!!
+        AlertDialog(
+            onDismissRequest = { activeDeleteTarget = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = "Warning",
+                        tint = Color(0xFFEC4899),
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Erasure Method Choice")
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "File: ${target.fileName}",
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFA8C7FA)
+                    )
+                    Text(
+                        text = "Choose whether you wish to perform a standard metadata deregistration (Quick Delete), or a multi-pass sector-scrambling erase (Secure Shred).",
+                        color = Color(0xFFE2E2E6),
+                        fontSize = 14.sp
+                    )
+                    Text(
+                        text = "⚠️ Warning: Secure Shred overwrites raw file bytes with zeros and high-entropy noise. This action takes longer and makes recovery impossible.",
+                        color = Color(0xFFEC4899),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onShredFile(target.id, target.recoveredPath)
+                        activeDeleteTarget = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEC4899))
+                ) {
+                    Text("Secure Shred", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteFile(target.id, target.recoveredPath)
+                        activeDeleteTarget = null
+                    }
+                ) {
+                    Text("Quick Delete", color = Color(0xFFA8C7FA))
+                }
+            },
+            containerColor = Color(0xFF1B1D22),
+            titleContentColor = Color(0xFFE2E2E6),
+            textContentColor = Color(0xFF909094)
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -1095,7 +1166,7 @@ fun VaultScreen(
                         VaultCard(
                             file = log,
                             onShare = { onShareFile(log.recoveredPath) },
-                            onDelete = { onDeleteFile(log.id, log.recoveredPath) },
+                            onDelete = { activeDeleteTarget = log },
                             getReadableSize = getReadableSize
                         )
                     }
@@ -1154,7 +1225,7 @@ fun EmptyVaultState() {
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                Icons.Default.List,
+                Icons.AutoMirrored.Filled.List,
                 contentDescription = null,
                 tint = Color(0xFF909094),
                 modifier = Modifier.size(36.dp)
@@ -1193,9 +1264,9 @@ fun VaultCard(
     }
 
     val typeIcon = when (file.fileType) {
-        "PHOTO" -> Icons.Default.Star
+        "PHOTO" -> Icons.Default.Favorite
         "VIDEO" -> Icons.Default.PlayArrow
-        "AUDIO" -> Icons.Default.Refresh
+        "AUDIO" -> Icons.Default.PlayArrow
         else -> Icons.Default.Edit
     }
 
@@ -1222,7 +1293,7 @@ fun VaultCard(
             Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Recovered_" + file.fileName,
+                    text = file.fileName,
                     fontWeight = FontWeight.SemiBold,
                     color = Color(0xFFE2E2E6),
                     fontSize = 13.sp,
@@ -1331,110 +1402,133 @@ fun HistoryCard(history: com.example.data.ScanHistory) {
 }
 
 @Composable
-fun GuideScreen() {
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        item {
-            Text(
-                "FORENSICS & RECOVERY DIRECTIVE",
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp,
-                color = Color(0xFFA8C7FA),
-                letterSpacing = 1.sp,
-                fontFamily = FontFamily.Monospace
-            )
-        }
-
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1D22)),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f)),
-                shape = RoundedCornerShape(16.dp)
+fun ForensicGuideDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        tint = Color(0xFFA8C7FA),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        "1. How file recovery works on flash memory",
+                        "Forensic Directives",
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFFE2E2E6),
-                        fontSize = 13.sp
+                        fontSize = 16.sp
                     )
-                    Text(
-                        "On modern storage systems (NAND flash, SSDs), when a file is deleted, Android removes standard Index pointers in key directory nodes. The original raw binary bits of the file remain unlinked in underlying sector clusters until new files write over those blocks.",
-                        color = Color(0xFF909094),
-                        fontSize = 12.sp
+                }
+                IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = Color(0xFF909094)
                     )
                 }
             }
-        }
-
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1D22)),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f)),
-                shape = RoundedCornerShape(16.dp)
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF232830)),
+                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.05f)),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text(
-                        "2. Our Deep Scan Signature Algorithm",
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFFE2E2E6),
-                        fontSize = 13.sp
-                    )
-                    Text(
-                        "Our deep scan traverser reads raw accessible binary streams on local folders. By parsing the exact hexadecimal byte sequences at block origins (magic numbers like 0xFFD8FF for JPEG and 0x89504E47 for PNG), we identify hidden, renamed, or orphaned files, restoring them immediately with accurate metadata bindings.",
-                        color = Color(0xFF909094),
-                        fontSize = 12.sp
-                    )
-                }
-            }
-        }
-
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFEC4899).copy(alpha = 0.08f)),
-                border = BorderStroke(1.dp, Color(0xFFEC4899).copy(alpha = 0.5f)),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFEC4899))
-                        Spacer(modifier = Modifier.width(10.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         Text(
-                            "CRITICAL ADVISORY: CRASH OVERWRITING RISK",
+                            "1. How file recovery works on flash memory",
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFFEC4899),
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace
+                            color = Color(0xFFE2E2E6),
+                            fontSize = 13.sp
+                        )
+                        Text(
+                            "On modern storage systems (NAND flash, SSDs), when a file is deleted, Android removes standard Index pointers in key directory nodes. The original raw binary bits of the file remain unlinked in underlying sector clusters until new files write over those blocks.",
+                            color = Color(0xFF909094),
+                            fontSize = 12.sp
                         )
                     }
-                    Text(
-                        "To maximize file recovery rates, IMMEDIATELY halt downloading external files, taking images, or streaming media. Every operation that writes data to local flash storage risks overwriting the sectors where deleted files reside, making forensic recovery mathematically impossible.",
-                        color = Color(0xFF909094),
-                        fontSize = 12.sp
-                    )
+                }
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF232830)),
+                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.05f)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            "2. Our Deep Scan Signature Algorithm",
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFE2E2E6),
+                            fontSize = 13.sp
+                        )
+                        Text(
+                            "Our deep scan traverser reads raw accessible binary streams on local folders. By parsing the exact hexadecimal byte sequences at block origins (magic numbers like 0xFFD8FF for JPEG and 0x89504E47 for PNG), we identify hidden, renamed, or orphaned files, restoring them immediately with accurate metadata bindings.",
+                            color = Color(0xFF909094),
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFEC4899).copy(alpha = 0.08f)),
+                    border = BorderStroke(1.dp, Color(0xFFEC4899).copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFEC4899), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                "CRITICAL ADVISORY",
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFEC4899),
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                        Text(
+                            "To maximize file recovery rates, IMMEDIATELY halt downloading external files, taking images, or streaming media. Every operation that writes data to local flash storage risks overwriting the sectors where deleted files reside, making forensic recovery mathematically impossible.",
+                            color = Color(0xFF909094),
+                            fontSize = 12.sp
+                        )
+                    }
                 }
             }
-        }
-        
-        item { Spacer(modifier = Modifier.height(24.dp)) }
-    }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Got It", color = Color(0xFFA8C7FA), fontWeight = FontWeight.Bold)
+            }
+        },
+        containerColor = Color(0xFF1B1D22),
+        shape = RoundedCornerShape(16.dp)
+    )
 }

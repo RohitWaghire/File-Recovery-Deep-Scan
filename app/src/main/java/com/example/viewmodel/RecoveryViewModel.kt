@@ -293,7 +293,7 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
         }
     }
 
-    private fun detectFileType(file: File, hexHeader: String): Pair<String, String> {
+    internal fun detectFileType(file: File, hexHeader: String): Pair<String, String> {
         // Check MAGIC HEADERS FIRST (more reliable than extensions)
         return when {
             hexHeader.startsWith("89504E47") -> "PHOTO" to "PNG Image (0x89504E47)"
@@ -413,7 +413,7 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
         }
     }
 
-    private fun getUniqueRecoveredFile(directory: File, originalName: String): File {
+    internal fun getUniqueRecoveredFile(directory: File, originalName: String): File {
         val baseName = originalName.substringBeforeLast(".")
         val extension = originalName.substringAfterLast(".", "")
         val suffix = if (extension.isNotEmpty()) ".$extension" else ""
@@ -441,7 +441,7 @@ class RecoveryViewModel(private val repository: RecoveryRepository) : ViewModel(
         return file
     }
 
-    private suspend fun updateHistoryWithRecovery(recoveredCount: Int, scanType: String = "MANUAL_RECOVERY") {
+    internal suspend fun updateHistoryWithRecovery(recoveredCount: Int, scanType: String = "MANUAL_RECOVERY") {
         if (recoveredCount <= 0) return
         try {
             val latest = repository.getLatestScanHistory()

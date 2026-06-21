@@ -35,6 +35,13 @@ class FakeRecoveryDao : RecoveryDao {
         return id
     }
 
+    override suspend fun updateScanHistory(history: ScanHistory) {
+        // Mirror Room @Update: replace the row with the matching primary key
+        scanHistoryList.removeAll { it.id == history.id }
+        scanHistoryList.add(history)
+        scanHistoryFlow.value = scanHistoryList.toList()
+    }
+
     override suspend fun insertRecoveredFile(file: RecoveredFile): Long {
         val id = if (file.id == 0L) (recoveredFilesList.size + 1).toLong() else file.id
         recoveredFilesList.removeAll { it.id == id }
@@ -59,7 +66,7 @@ class FakeRecoveryDao : RecoveryDao {
 }
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [34]) // SDK 34 runs on Java 17; SDK 36 would require Java 21
 class ExampleRobolectricTest {
 
   @Test

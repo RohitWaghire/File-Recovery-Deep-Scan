@@ -5,28 +5,57 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Pointy-Topped Rounded Hexagon with Blue Gradient Layer -->
+    <!-- LAYER 1: Symmetrical Rounded Cyber Shield (Outer Hexagon Bezel with Glowing Blue/Cyan Gradient) -->
     <path
-        android:pathData="M 50,18.3 Q 54,16 58,18.3 L 84,33.3 Q 87,35 87,38 L 87,70 Q 87,73 84,74.7 L 58,89.7 Q 54,92 50,89.7 L 24,74.7 Q 21,73 21,70 L 21,38 Q 21,35 24,33.3 L 50,18.3 Z">
+        android:pathData="M 55.5,22.8 L 79.5,35.2 Q 81,36 81,37.5 L 81,70.5 Q 81,72 79.5,72.8 L 55.5,85.2 Q 54,86 52.5,85.2 L 28.5,72.8 Q 27,72 27,70.5 L 27,37.5 Q 27,36 28.5,35.2 L 52.5,22.8 Q 54,22 55.5,22.8 Z">
         <gradient
-            android:startX="21"
-            android:startY="16"
-            android:endX="87"
-            android:endY="92"
+            android:startX="27"
+            android:startY="22"
+            android:endX="81"
+            android:endY="86"
             android:type="linear">
-            <item android:offset="0.0" android:color="#4CA4FF" />
-            <item android:offset="0.5" android:color="#1E88E5" />
-            <item android:offset="1.0" android:color="#0B5AD1" />
+            <item android:offset="0.0" android:color="#A8C7FA" />
+            <item android:offset="0.3" android:color="#5AB2FF" />
+            <item android:offset="1.0" android:color="#0284C7" />
         </gradient>
     </path>
 
-    <!-- Inner Subtle Glow or Shading for Hexagon Thickness -->
+    <!-- LAYER 2: Inner Premium Carbon Shield Overlay (Inset Hexagon) -->
     <path
-        android:pathData="M 50.8,20.0 Q 54,18.1 57.2,20.0 L 82.2,34.4 Q 85,36 85,38.7 L 85,67.3 Q 85,70 82.2,71.6 L 57.2,86.0 Q 54,87.9 50.8,86.0 L 25.8,71.6 Q 23,70 23,67.3 L 23,38.7 Q 23,36 25.8,34.4 L 50.8,20.0 Z"
-        android:fillColor="#15FFFFFF" />
+        android:fillColor="#12151D"
+        android:strokeWidth="1.2"
+        android:strokeColor="#30A8C7FA"
+        android:pathData="M 55.2,26.7 L 76.8,37.8 Q 78,38.5 78,40 L 78,68 Q 78,69.5 76.8,70.2 L 55.2,81.3 Q 54,82 52.8,81.3 L 31.2,70.2 Q 30,69.5 30,68 L 30,40 Q 30,38.5 31.2,37.8 L 52.8,26.7 Q 54,26 55.2,26.7 Z" />
 
-    <!-- Pure White Recovery Arrow (Mathematics-based Curve) -->
+    <!-- LAYER 3: Micro-Detailed Forensic Scanning Grid Lines (Inside Shield) -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M 40,40 L 68,40 M 40,54 L 68,54 M 40,68 L 68,68"
+        android:strokeWidth="0.5"
+        android:strokeColor="#15A8C7FA" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M 40,40 L 40,68 M 54,40 L 54,68 M 68,40 L 68,68"
+        android:strokeWidth="0.5"
+        android:strokeColor="#15A8C7FA" />
+
+
+    <!-- LAYER 5: Sleek Circular Recovery Arrow Loop -->
+    <!-- The Three-Quarter Loop Arc (Outer limit = 70, Inner limit = 38) -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4.0"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 54,37 A 17,17 0 1,1 37,54" />
+    
+    <!-- Bold Perfectly Aligned Arrowhead -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M 34,56 A 20,20 0 1,0 54,36 L 36,46 L 54,52 L 54,44 A 12,12 0 1,1 42,56 Z" />
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="0.8"
+        android:strokeLineJoin="round"
+        android:pathData="M 37,45.5 L 42.5,53.5 L 31.5,53.5 Z" />
+
 </vector>

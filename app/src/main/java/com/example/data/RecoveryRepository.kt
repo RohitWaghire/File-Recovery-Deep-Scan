@@ -11,10 +11,6 @@ class RecoveryRepository(private val recoveryDao: RecoveryDao) {
         return recoveryDao.insertScanHistory(history)
     }
 
-    suspend fun updateScanHistory(history: ScanHistory) {
-        return recoveryDao.updateScanHistory(history)
-    }
-
     suspend fun insertRecoveredFile(file: RecoveredFile): Long {
         return recoveryDao.insertRecoveredFile(file)
     }

@@ -12,9 +12,6 @@ interface RecoveryDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertScanHistory(history: ScanHistory): Long
 
-    @Update
-    suspend fun updateScanHistory(history: ScanHistory)
-
     @Query("SELECT * FROM recovered_files ORDER BY timestamp DESC")
     fun getAllRecoveredFiles(): Flow<List<RecoveredFile>>
 
